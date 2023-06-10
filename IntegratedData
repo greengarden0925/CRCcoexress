@@ -1,0 +1,620 @@
+#Validation analysis using integated data######################
+#1.Load packages#################################################
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+pkgInstall <- function(x) {
+  withr::local_options(.new = list(warn = -1)) #忽略warning
+  if (!require(x, character.only = TRUE))
+  {
+    BiocManager::install(x, force = T, dependencies = TRUE)
+    if (!require(x, character.only = TRUE))
+      stop("Package not found")
+  }
+}
+
+
+mpackages = c(
+  "data.table",
+  "tidyverse",
+  "dplyr",
+  "corrr",
+  "corrplot",
+  "naniar",
+  "DataExplorer",
+  "car",
+  "bestNormalize",
+  "openxlsx",
+  "writexl",
+  "tibble",
+  "ggplot2",
+  "openxlsx",
+  "visNetwork",
+  "lubridate",
+  "forestplot",
+  "olsrr",
+  "pals",
+  "AnnotationDbi",
+  "openxlsx",
+  "forcats",
+  "expss",
+  "plotly",
+  "stringr",
+  "reshape2",
+  "shiny",
+  "shinyAce"
+)
+
+lapply(mpackages, pkgInstall)
+
+
+#2. Function#############################################################
+pvalue <- function(x, ...) {
+  #for table1()
+  # Construct vectors of data y, and groups (strata) g
+  y <- unlist(x)
+  g <- factor(rep(1:length(x), times = sapply(x, length)))
+  if (is.numeric(y)) {
+    # For numeric variables, perform a standard 2-sample t-test
+    #p <- t.test(y ~ g)$p.value
+    
+    tmp = aov(y ~ g)
+    p = summary(tmp)[[1]][1, 5]
+    
+    
+  } else {
+    p = tryCatch(
+      chisq.test(table(y, g))$p.value,
+      warning = function(w) {
+        fisher.test(table(y, g), alternative = "two.sided")$p.value
+      }
+    )
+    
+    
+    # For categorical variables, perform a chi-squared test of independence
+    p <- chisq.test(table(y, g))$p.value
+    
+    #fisher exact test\\\\\\\\\\\\\\\\
+    
+    
+    p = fisher.test(table(y, g), alternative = "two.sided")$p.value
+    
+    p$p.value
+    
+    
+    
+    
+  }
+  # # Format the p-value, using an HTML entity for the less-than sign.
+  # # The initial empty string places the output on the line below the variable label.
+  # #&lt; is equal to <
+  # c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+  
+  p <- formatC(numb, format = "e", digits = 2)
+  
+}
+
+#2.configuration##########################################################
+setwd("F:\\Research\\1110920 GUCA2B SPIB miRNA") 
+
+#3.Load gene expression and clinical features data###############################################
+#> load gene expression data---------------
+fn = file.path("Data", "1110920 CRC merged files 14698 cases.RData")
+ge = readRDS(fn)
+
+dim(ge)# 14698*1274
+ge[1:100, 1:5]
+row.names(ge)
+names(ge)[1270:1274]
+
+ge2 = as.data.frame(t(ge))
+ge2[1:100, 1:5]
+class(ge2)
+
+#read clinical feature data----------------
+fn = file.path("Data", "1000513Demographpooled.xlsx")
+fn
+clin = read.xlsx(fn, sheet = 1)
+head(clin)
+
+tmp = clin
+
+#correct cloumn name
+setnames(tmp, 'rescectionsite', 'resectionsite')
+
+#tumor//////
+table(tmp$tumor)
+tmp$tumor = factor(
+  tmp$tumor,
+  levels = c("nm", "ad", "ac", "cn", "mt"),
+  labels = c(
+    "Normal",
+    "Adenoma",
+    "Adenocarcinoma",
+    "Carcinoma",
+    "Metastasis"
+  )
+)
+table(tmp$tumor)
+
+#age////
+hist(tmp$agecode)
+tmp$agegroup = car::recode(tmp$agecode, "lo:50='<50';50:74='50-74';75:hi='≥75'")
+table(tmp$agegroup)
+
+#gender/////
+tmp$gender = factor(tmp$gendercode,
+                    levels = 0:1,
+                    labels = c("Female", "Male"))
+table(tmp$gender)
+tmp$gendercode = NULL
+
+#grade//////
+table(tmp$gradecode1)
+
+
+#stage/////
+table(tmp$stagecode1)
+tmp$stagecode1 = factor(tmp$stagecode1)
+
+#proxdistalcode////
+table(tmp$proxdistalcode)
+tmp$proxdistalcode = factor(tmp$proxdistalcode,
+                            levels = 0:1,
+                            labels = c("proximal", "distal"))
+table(tmp$proxdistalcode)
+
+
+#MSI MSS////
+table(tmp$MSIMSScode)
+tmp$MSIMSScode = factor(tmp$MSIMSScode,
+                        levels = 0:1,
+                        labels = c("MSS", "MSI"))
+table(tmp$MSIMSScode)
+
+#grade
+table(tmp$differential.grade)
+tmp$differential.grade = NULL
+
+#primary_metastatic.tumors//////////
+table(tmp$primary_metastatic.tumors)
+
+#tumor_normal
+table(tmp$tumor_normal)
+tmp$tumor_normal = NULL
+
+#Stage
+table(tmp$Stage)
+tmp$Stage = NULL
+
+#Left_right.site\\\\\
+table(tmp$Left_right.site)
+
+#tumor.content
+table(tmp$tumor.content)
+
+#tumor.content
+table(tmp$tissue_dissect_method)
+tmp$tissue_dissect_method = NULL
+
+#metastasis
+table(tmp$metastasis)
+tmp$metastasis = trimws(tmp$metastasis)
+unique(tmp$metastasis)
+table(tmp$metastasis)
+
+#specimen
+table(tmp$Specimen)
+tmp$Specimen = NULL
+
+
+#specimen.size
+table(tmp$specimen.size)
+tmp$specimen.size = trimws(tmp$specimen.size)
+table(tmp$specimen.size)
+unique(tmp$specimen.size)
+
+tmp$specimen.size = car::recode(
+  tmp$specimen.size,
+  "'1.0 cm'=1;'2.0 cm'=2;'1.5 cm'=1.5;'3.0 cm'=3;'4.0 cm'=4;'3.5 cm'=3.5;'0.2 cm (x3)'=0.2;'2.5mm'=0.25"
+)
+
+
+#T
+table(tmp$T)
+tmp$T = factor(tmp$T)
+
+table(tmp$N)
+tmp$N = factor(tmp$N)
+
+tmp$M = trimws(tmp$M)
+tmp$M = car::recode(tmp$M, "'x'=NA")
+table(tmp$M)
+
+tmp$M = factor(tmp$M)
+
+
+
+#UICC
+table(tmp$UICC)
+
+#LymphNodesInvaded
+table(tmp$LymphNodesInvaded)
+
+table(tmp$LymphNodesRemoved)
+tmp$LymphNodesRemoved = NULL
+
+#recurrence
+table(tmp$recurrence)
+
+table(tmp$death.from.any.cause)
+
+table(tmp$death.from.cancer)
+
+
+#Chemotherapy
+table(tmp$chemotherapy)
+tmp$chemotherapy = trimws(tmp$chemotherapy)
+tmp$chemotherapy = car::recode(tmp$chemotherapy, "'AdjCTX:'='Y'")
+tmp$chemotherapy = gsub('AdjCTX:', 'Y', tmp$chemotherapy)
+
+
+#cancer.in.family
+tmp$cancer.in.family = trimws(tmp$cancer.in.family)
+tmp$cancer.in.family = toupper(tmp$cancer.in.family)
+table(tmp$cancer.in.family)
+tmp$cancer.in.family = car::recode(tmp$cancer.in.family,
+                                   "'N'='No';'Y'='Yes';'NO HNPCC, NO FAP'='No'")
+table(tmp$cancer.in.family)
+
+#resection site
+tmp$resection.site = NULL
+tmp$rescectionsite = trimws(tmp$rescectionsite)
+table(tmp$rescectionsite)
+tmp$rescectionsite = car::recode(
+  tmp$rescectionsite,
+  "'sigmoid colon'='colon sigmoid';'ascending colon'='colon ascending';
+                               'descending colon'='colon descending';'colon descending-sigm.'='colon descending'"
+)
+
+table(tmp$rescectionsite)
+
+
+#variable label
+
+var_lab(tmp$stagecode1) = "Stage"
+var_lab(tmp$stagecode2) = "Stage"
+var_lab(tmp$agecode) = "Age"
+var_lab(tmp$agegroup) = "Age"
+var_lab(tmp$gender) = "Gender"
+var_lab(tmp$ethnicode) = "Ethnic"
+var_lab(tmp$gradecode1) = "Grade"
+var_lab(tmp$mucinouscode) = "Mucinous"
+var_lab(tmp$mucinous) = "Mucinous"
+var_lab(tmp$rescectionsite) = "Rescection site"
+var_lab(tmp$proxdistalcode) = "Position"
+var_lab(tmp$MSIMSScode) = "MSI vs MSS"
+var_lab(tmp$primary_metastatic.tumors) = "Primary vs metastasis"
+var_lab(tmp$Left_right.site) = "Left vs right site"
+var_lab(tmp$tumor.content) = "Tumor content (%)"
+var_lab(tmp$metastasis) = "Metastasis"
+var_lab(tmp$LymphNodesInvaded) = "Invaded lymph nodes"
+var_lab(tmp$recurrence) = "Recurrence"
+var_lab(tmp$cancer.recurrence.time) = "Recurrence free suvival time (mo)"
+var_lab(tmp$tumor.free.suvival.time) = "Tumor free suvival time (mo)"
+var_lab(tmp$death.from.any.cause) = "All death"
+var_lab(tmp$death.from.cancer) = "Death from cancer"
+var_lab(tmp$overall.survival.time) = "Overall survival time (mo)"
+var_lab(tmp$cancer.in.family) = "Family history"
+var_lab(tmp$radiotherapy) = "Radiotherapy"
+var_lab(tmp$chemotherapy) = "Chemotherapy"
+var_lab(tmp$specimen.size) = "Specimen size (cm)"
+
+#conver to numeric
+tmp$cancer.recurrence.time = as.numeric(tmp$cancer.recurrence.time)
+tmp$overall.survival.time = as.numeric(tmp$overall.survival.time)
+tmp$tumor.free.suvival.time = as.numeric(tmp$tumor.free.suvival.time)
+
+clin = tmp
+saveRDS(clin, "Data\\Clinical features.RData")
+
+geclin = merge(clin, ge2, by.x = "GSMnames", by.y = 0)
+
+dim(geclin) #1274*14737
+
+saveRDS(geclin, "Data\\CRC gene expression and clinical features.RData")
+
+#4.table 1########################################################
+md = median(geclin$GUCA2B)
+GUCA2B.G = car::recode(geclin$GUCA2B, "lo:md='Low';md:hi='High'")
+table(GUCA2B.G)
+
+md = median(geclin$SPIB)
+SPIB.G = car::recode(geclin$SPIB, "lo:md='Low';md:hi='High'")
+table(SPIB.G)
+
+
+md = median(geclin$AQP8)
+AQP8.G = car::recode(geclin$AQP8, "lo:md='Low';md:hi='High'")
+table(AQP8.G)
+
+tmp2 = cbind(
+  GUCA2B.G = GUCA2B.G,
+  SPIB.G = SPIB.G,
+  AQP8.G = AQP8.G,
+  GUCA2B = ge2$GUCA2B,
+  SPIB = ge2$SPIB,
+  AQP8 = ge2$AQP8,
+  clin
+)
+head(tmp2)
+table1( ~ . | GUCA2B.G, tmp2)
+
+names(tmp2)
+
+wtVars = c(
+  "GUCA2B",
+  "GUCA2B.G",
+  "SPIB",
+  "SPIB.G",
+  "AQP8",
+  "AQP8.G",
+  "ethnicode",
+  "agecode" ,
+  "agegroup" ,
+  "gender",
+  "cancer.in.family" ,
+  "tumor" ,
+  "gradecode1" ,
+  "stagecode1",
+  "UICC",
+  "T"   ,
+  "N" ,
+  "M" ,
+  "LymphNodesInvaded"  ,
+  "mucinous"  ,
+  "rescectionsite"  ,
+  "proxdistalcode" ,
+  "Left_right.site" ,
+  "tumor.content",
+  "specimen.size" ,
+  "MSIMSScode"   ,
+  "primary_metastatic.tumors",
+  "metastasis"     ,
+  "radiotherapy"   ,
+  "chemotherapy"   ,
+  "recurrence"       ,
+  "cancer.recurrence.time"  ,
+  "tumor.free.suvival.time"  ,
+  "death.from.any.cause"  ,
+  "death.from.cancer"   ,
+  "overall.survival.time"
+)
+
+tmp3 = tmp2[, wtVars]
+table1(
+  ~ . | GUCA2B.G,
+  data = tmp3,
+  overall = F,
+  render.missing = NULL,
+  render.categorical = "FREQ (PCTnoNA%)",
+  caption = "GUCA2B",
+  extra.col = list(`P-value` = pvalue)
+)
+
+
+table1(
+  ~ . | SPIB.G,
+  data = tmp3,
+  overall = F,
+  render.missing = NULL,
+  render.categorical = "FREQ (PCTnoNA%)",
+  caption = "SPIB",
+  extra.col = list(`P-value` = pvalue)
+)
+
+
+table1(
+  ~ . | AQP8.G,
+  data = tmp3,
+  overall = F,
+  render.missing = NULL,
+  render.categorical = "FREQ (PCTnoNA%)",
+  caption = "AQP8",
+  extra.col = list(`P-value` = pvalue)
+)
+
+geclin2 = tmp3
+
+saveRDS(geclin2, "Data\\geclin2.RData")
+
+#5. coexpression plot############################################
+#plot grouped violin plot///////////////////////////////////////
+violinPlot = function(dt, x, y, fx, fy, colorc, type) {
+  ##debug:
+  # dt=ge
+  # x="tumor" #PlotX()
+  # y="GUCA2B" #PlotY()
+  # fx="gendercode" #facet x  #FacetX()
+  # fy="stagecode1" #facet y  #FacetY()
+  # colorc="recurrence" #fill colors by this #PlotColr()
+  # type="violin" #violin #plot type
+  # dt$tumor=as.factor(dt$tumor)
+  # dt$GUCA2B=as.numeric(dt$GUCA2B)
+  # dt$gendercode=as.factor(dt$gendercode)
+  # type="violin"    #RBPlotType()
+  
+  
+  p = NULL
+  if (is.empty(colorc)) {
+    p <- ggplot(dt, aes(y = get(y), x = get(x)))
+    
+  } else{
+    p <- ggplot(dt, aes(
+      y = get(y),
+      x = get(x),
+      color = get(colorc)
+    ))
+    
+  }
+  
+  if (is.null(type)) {
+    p <- p + geom_violin()
+  } else{
+    switch (type,
+            point = {
+              p <- p + geom_point()
+            },
+            boxplot = {
+              p <- p + geom_boxplot()
+            },
+            violin = {
+              p <- p + geom_violin()
+            })
+  }
+  
+  
+  p <- p + labs(
+    title = sprintf("%s Plot of gene expression\n", type),
+    x = x,
+    y = y,
+    color = colorc
+  )
+  
+  p
+  
+  fm = NULL
+  if (is.empty(fx) & is.empty(fy)) {
+    p = ggplotly(p)
+    return(p)
+  }
+  
+  if (is.empty(fx)) {
+    fm = formula(paste0(fy, "~."))
+  } else if (is.empty(fy)) {
+    fm = formula(paste0("~ ", fx))
+  } else if (!is.empty(fx) & !is.empty(fy)) {
+    fm = formula(paste0(fy, " ~ ", fx))
+  }
+  
+  fm
+  p <- p + facet_grid(fm, scales = "free_y",
+                      labeller = label_both) #show facet_grid labels with variable names and values
+  p <- ggplotly(p)
+  
+  return(p)
+  
+}
+
+violinPlot(
+  geclin2,
+  x = 'SPIB',
+  y = 'GUCA2B',
+  colorc = 'tumor',
+  fx = 'tumor',
+  fy = '',
+  type = "point"
+)
+
+
+
+violinPlot(
+  geclin2,
+  x = 'SPIB',
+  y = 'AQP8',
+  colorc = 'tumor',
+  fx = 'tumor',
+  fy = '',
+  type = "point"
+)
+
+
+violinPlot(
+  geclin2,
+  x = 'GUCA2B',
+  y = 'AQP8',
+  colorc = 'tumor',
+  fx = 'tumor',
+  fy = '',
+  type = "point"
+)
+
+
+violinPlot(
+  geclin2,
+  x = 'SPIB',
+  y = 'GUCA2B',
+  colorc = 'tumor',
+  fx = 'ethnicode',
+  fy = NULL,
+  type = "point"
+)
+
+#good
+violinPlot(
+  geclin2,
+  x = 'SPIB',
+  y = 'GUCA2B',
+  colorc = 'tumor',
+  fx = '',
+  fy = NULL,
+  type = "point"
+)
+
+
+violinPlot(
+  geclin2,
+  x = 'SPIB',
+  y = 'GUCA2B',
+  colorc = 'tumor',
+  fx = 'resectionsite',
+  fy = NULL,
+  type = "point"
+)
+
+
+violinPlot(
+  geclin2,
+  x = 'SPIB',
+  y = 'GUCA2B',
+  colorc = 'tumor',
+  fx = 'MSIMSScode',
+  fy = NULL,
+  type = "point"
+)
+
+
+
+violinPlot(
+  geclin2,
+  x = 'tumor',
+  y = 'GUCA2B',
+  colorc = 'tumor',
+  fx = '',
+  fy = NULL,
+  type = "boxplot"
+)
+
+
+violinPlot(
+  geclin,
+  x = 'tumor',
+  y = 'SPIB',
+  colorc = 'tumor',
+  fx = '',
+  fy = NULL,
+  type = "boxplot"
+)
+
+
+
+violinPlot(
+  geclin,
+  x = 'tumor',
+  y = 'AQP8',
+  colorc = 'tumor',
+  fx = '',
+  fy = NULL,
+  type = "boxplot"
+)
